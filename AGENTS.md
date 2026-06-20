@@ -4,15 +4,15 @@ Guidance for OpenCode sessions working in this repo.
 
 ## What this repo is
 
-A single bash script (`ftv`) that controls an Amazon Fire TV via ADB over WiFi.
-No build system, no tests, no lint, no dependencies beyond `adb`. The script is
-the only artifact.
+A single Python script (`ftv`) that controls an Amazon Fire TV via ADB over WiFi.
+No build system, no tests, no lint, no dependencies beyond Python 3 and `adb`.
+The script is the only artifact.
 
 ## Verification
 
 There is no test suite. Verify changes in two steps:
 
-1. **Syntax check:** `bash -n ftv`
+1. **Syntax check:** `python3 -m py_compile ftv`
 2. **Manual test against a live Fire TV:** copy the script to the working
    location and run a subcommand:
    ```sh

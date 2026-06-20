@@ -2,7 +2,7 @@
 
 Control your Amazon Fire TV from the terminal via ADB.
 
-`ftv` is a single bash script that wraps `adb` commands to provide a clean,
+`ftv` is a single Python script that wraps `adb` commands to provide a clean,
 git-style CLI for navigating the Fire TV UI, managing apps, capturing
 screenshots, and more — all from your Mac or Linux terminal over WiFi.
 
@@ -15,15 +15,15 @@ screenshots, and more — all from your Mac or Linux terminal over WiFi.
 - Take screenshots to your Desktop (or custom path)
 - Install, uninstall, list, and launch apps (APK sideloading supported)
 - Auto-reconnect: re-establishes the ADB connection if it drops
-- No dependencies beyond `adb` (Android Platform Tools)
-- Config stored in `~/.config/ftv/config` (no shell profile pollution)
+- No dependencies beyond Python 3 and `adb` (Android Platform Tools)
+- Config stored in `~/.config/ftv/config.json` (no shell profile pollution)
 
 ## Requirements
 
 - [`adb`](https://developer.android.com/tools/releases/platform-tools) (Android Platform Tools)
 - An Amazon Fire TV (Stick / Cube / Edition TV) with **ADB Debugging** enabled
 - Both devices on the **same WiFi network**
-- `bash` 4+
+- Python 3.6+
 
 ## Installation
 
