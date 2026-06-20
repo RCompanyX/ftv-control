@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# ftv - Control del Amazon Fire TV via ADB
-# Uso: ftv <subcomando> [argumentos]
-# Config: ~/.config/ftv/config (contiene la IP del Fire TV)
+# ftv - Control your Amazon Fire TV via ADB
+# Usage: ftv <subcommand> [arguments]
+# Config: ~/.config/ftv/config (contains the Fire TV IP)
 
 set -euo pipefail
 
@@ -21,7 +21,7 @@ ftv_save_ip() {
   local ip="$1"
   mkdir -p "${CONFIG_DIR}"
   echo "${ip}" > "${CONFIG_FILE}"
-  echo "IP guardada: ${ip}"
+  echo "IP saved: ${ip}"
 }
 
 ftv_connected() {
@@ -35,16 +35,16 @@ ftv_ensure_connected() {
   local ip
   ip="$(ftv_get_ip)"
   if [[ -z "${ip}" ]]; then
-    echo "Error: no hay IP configurada. Usa: ftv set-ip <IP>" >&2
+    echo "Error: no IP configured. Use: ftv set-ip <IP>" >&2
     return 1
   fi
   if ! ftv_connected; then
-    echo "Conectando a ${ip}:${PORT}..." >&2
+    echo "Connecting to ${ip}:${PORT}..." >&2
     adb connect "${ip}:${PORT}" >/dev/null 2>&1 || true
     sleep 1
     if ! ftv_connected; then
-      echo "Error: no se pudo conectar a ${ip}:${PORT}" >&2
-      echo "Asegúrate de que el Fire TV está encendido y ADB Debugging activado." >&2
+      echo "Error: could not connect to ${ip}:${PORT}" >&2
+      echo "Make sure the Fire TV is on and ADB Debugging is enabled." >&2
       return 1
     fi
   fi
@@ -55,13 +55,13 @@ ftv_keyevent() {
   adb shell input keyevent "$1"
 }
 
-# ===== Subcomandos =====
+# ===== Subcommands =====
 
 ftv_connect() {
   local ip
   ip="$(ftv_get_ip)"
   if [[ -z "${ip}" ]]; then
-    echo "Error: no hay IP configurada. Usa: ftv set-ip <IP>" >&2
+    echo "Error: no IP configured. Use: ftv set-ip <IP>" >&2
     return 1
   fi
   adb connect "${ip}:${PORT}"
@@ -83,7 +83,7 @@ ftv_status() {
 
 ftv_set_ip() {
   if [[ $# -lt 1 ]]; then
-    echo "Uso: ftv set-ip <IP>" >&2
+    echo "Usage: ftv set-ip <IP>" >&2
     return 1
   fi
   ftv_save_ip "$1"
@@ -93,16 +93,16 @@ ftv_ip() {
   local ip
   ip="$(ftv_get_ip)"
   if [[ -n "${ip}" ]]; then
-    echo "IP configurada: ${ip}"
+    echo "Configured IP: ${ip}"
   else
-    echo "No hay IP configurada. Usa: ftv set-ip <IP>"
+    echo "No IP configured. Use: ftv set-ip <IP>"
     return 1
   fi
 }
 
 ftv_type() {
   if [[ $# -lt 1 ]]; then
-    echo "Uso: ftv type \"<texto>\"" >&2
+    echo "Usage: ftv type \"<text>\"" >&2
     return 1
   fi
   ftv_ensure_connected || return 1
@@ -120,32 +120,32 @@ ftv_screenshot() {
   adb shell screencap -p /sdcard/ftv_shot.png \
     && adb pull /sdcard/ftv_shot.png "${out}" \
     && adb shell rm /sdcard/ftv_shot.png \
-    && echo "Captura guardada en: ${out}"
+    && echo "Screenshot saved to: ${out}"
 }
 
 ftv_launch() {
   local pkg activity
   if [[ $# -lt 1 ]]; then
-    echo "Uso: ftv launch <paquete>" >&2
+    echo "Usage: ftv launch <package>" >&2
     return 1
   fi
   pkg="$1"
   ftv_ensure_connected || return 1
-  # Intentar primero con monkey (categoría LAUNCHER estándar)
+  # Try monkey first (standard LAUNCHER category)
   if adb shell monkey -p "${pkg}" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; then
-    echo "App ${pkg} lanzada."
+    echo "App ${pkg} launched."
     return 0
   fi
-  # monkey falló: buscar la activity MAIN y lanzar con am start
+  # monkey failed: resolve the MAIN activity and launch with am start
   activity="$(adb shell dumpsys package "${pkg}" 2>/dev/null \
     | grep -A1 'android.intent.action.MAIN' \
     | grep -oE "${pkg}/[A-Za-z0-9._]+" | head -1)"
   if [[ -n "${activity}" ]]; then
     adb shell am start -n "${activity}" >/dev/null 2>&1 \
-      && echo "App ${pkg} lanzada via am start (${activity})." \
+      && echo "App ${pkg} launched via am start (${activity})." \
       && return 0
   fi
-  echo "Error: no se pudo lanzar ${pkg}. No se encontró activity MAIN." >&2
+  echo "Error: could not launch ${pkg}. No MAIN activity found." >&2
   return 1
 }
 
@@ -160,7 +160,7 @@ ftv_list() {
 
 ftv_install() {
   if [[ $# -lt 1 ]]; then
-    echo "Uso: ftv install <ruta-apk>" >&2
+    echo "Usage: ftv install <apk-path>" >&2
     return 1
   fi
   ftv_ensure_connected || return 1
@@ -169,7 +169,7 @@ ftv_install() {
 
 ftv_reinstall() {
   if [[ $# -lt 1 ]]; then
-    echo "Uso: ftv reinstall <ruta-apk>" >&2
+    echo "Usage: ftv reinstall <apk-path>" >&2
     return 1
   fi
   ftv_ensure_connected || return 1
@@ -178,7 +178,7 @@ ftv_reinstall() {
 
 ftv_uninstall() {
   if [[ $# -lt 1 ]]; then
-    echo "Uso: ftv uninstall <paquete>" >&2
+    echo "Usage: ftv uninstall <package>" >&2
     return 1
   fi
   ftv_ensure_connected || return 1
@@ -187,54 +187,54 @@ ftv_uninstall() {
 
 ftv_help() {
   cat <<'EOF'
-ftv - Control del Amazon Fire TV via ADB
+ftv - Control your Amazon Fire TV via ADB
 
-CONEXIÓN:
-  ftv connect               Conectar al Fire TV
-  ftv disconnect            Desconectar
-  ftv status                Estado de la conexión (adb devices)
-  ftv set-ip <IP>           Guardar IP del Fire TV en config
-  ftv ip                    Mostrar IP configurada
+CONNECTION:
+  ftv connect               Connect to the Fire TV
+  ftv disconnect            Disconnect
+  ftv status                Connection status (adb devices)
+  ftv set-ip <IP>           Save the Fire TV IP to config
+  ftv ip                    Show the configured IP
 
-NAVEGACIÓN (control remoto):
+NAVIGATION (remote control):
   ftv up | down | left | right
-  ftv ok                    Botón central / OK
-  ftv back                  Atrás
-  ftv home                  Inicio
-  ftv menu                  Menú
+  ftv ok                    Center / OK button
+  ftv back                  Back
+  ftv home                  Home
+  ftv menu                  Menu
 
 MEDIA:
-  ftv play                  Play/Pausa
-  ftv fwd                   Avanzar rápido
-  ftv rew                   Rebobinar
-  ftv next                  Siguiente pista
-  ftv prev                  Pista anterior
-  ftv volup                 Subir volumen
-  ftv voldown               Bajar volumen
-  ftv mute                  Silenciar
+  ftv play                  Play/Pause
+  ftv fwd                   Fast forward
+  ftv rew                   Rewind
+  ftv next                  Next track
+  ftv prev                  Previous track
+  ftv volup                 Volume up
+  ftv voldown               Volume down
+  ftv mute                  Mute
 
-TECLADO:
-  ftv type "<texto>"        Escribir texto
-  ftv enter                 Intro
-  ftv del                   Borrar
+KEYBOARD:
+  ftv type "<text>"         Type text
+  ftv enter                 Enter
+  ftv del                   Delete
 
-ENCENDIDO:
-  ftv on                    Despertar
-  ftv off                   Reposo
-  ftv toggle                Alternar encendido
+POWER:
+  ftv on                    Wake up
+  ftv off                   Sleep
+  ftv toggle                Toggle power
 
-CAPTURA:
-  ftv screenshot [ruta]     Captura de pantalla (por defecto ~/Desktop)
+SCREENSHOT:
+  ftv screenshot [path]     Take a screenshot (defaults to ~/Desktop)
 
 APPS:
-  ftv launch <paquete>      Abrir app por nombre de paquete
-  ftv list [--third]        Listar apps (con --third solo de terceros)
-  ftv install <apk>         Instalar APK
-  ftv reinstall <apk>       Reinstalar manteniendo datos
-  ftv uninstall <paquete>   Desinstalar app
+  ftv launch <package>      Open an app by package name
+  ftv list [--third]        List apps (with --third, third-party only)
+  ftv install <apk>         Install an APK
+  ftv reinstall <apk>       Reinstall, keeping data
+  ftv uninstall <package>   Uninstall an app
 
-OTROS:
-  ftv help                  Mostrar esta ayuda
+OTHERS:
+  ftv help                  Show this help
 EOF
 }
 
@@ -245,13 +245,13 @@ main() {
   shift || true
 
   case "${cmd}" in
-    # Conexión
+    # Connection
     connect)     ftv_connect "$@" ;;
     disconnect)  ftv_disconnect "$@" ;;
     status)      ftv_status "$@" ;;
     set-ip)      ftv_set_ip "$@" ;;
     ip)          ftv_ip "$@" ;;
-    # Navegación
+    # Navigation
     up)          ftv_keyevent KEYCODE_DPAD_UP ;;
     down)        ftv_keyevent KEYCODE_DPAD_DOWN ;;
     left)        ftv_keyevent KEYCODE_DPAD_LEFT ;;
@@ -269,15 +269,15 @@ main() {
     volup)       ftv_keyevent KEYCODE_VOLUME_UP ;;
     voldown)     ftv_keyevent KEYCODE_VOLUME_DOWN ;;
     mute)        ftv_keyevent KEYCODE_VOLUME_MUTE ;;
-    # Teclado
+    # Keyboard
     type)        ftv_type "$@" ;;
     enter)       ftv_keyevent KEYCODE_ENTER ;;
     del)         ftv_keyevent KEYCODE_DEL ;;
-    # Encendido
+    # Power
     on|wake)     ftv_keyevent KEYCODE_WAKEUP ;;
     off|sleep)   ftv_keyevent KEYCODE_SLEEP ;;
     toggle|power) ftv_keyevent KEYCODE_POWER ;;
-    # Captura
+    # Screenshot
     screenshot|shot) ftv_screenshot "$@" ;;
     # Apps
     launch|open) ftv_launch "$@" ;;
@@ -285,11 +285,11 @@ main() {
     install)     ftv_install "$@" ;;
     reinstall)   ftv_reinstall "$@" ;;
     uninstall)   ftv_uninstall "$@" ;;
-    # Ayuda
+    # Help
     help|-h|--help) ftv_help ;;
     *)
-      echo "Error: subcomando desconocido '${cmd}'" >&2
-      echo "Usa 'ftv help' para ver las opciones disponibles." >&2
+      echo "Error: unknown subcommand '${cmd}'" >&2
+      echo "Use 'ftv help' to see available options." >&2
       exit 1
       ;;
   esac
