@@ -175,7 +175,7 @@ ftv <subcommand> [arguments]
 
 ## Examples
 
-Open Example App on the Fire TV:
+Open an app on the Fire TV by its package name:
 
 ```sh
 ftv launch com.example.app
