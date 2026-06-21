@@ -11,6 +11,11 @@ CONFIG_DIR = Path.home() / ".config" / "ftv"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 PORT = 5555
 
+# module-global IP override for alias-prefijo dispatch. Not
+# thread-safe, but the script is single-threaded. Upgrade: pass ip through
+# every cmd_* if we ever go concurrent.
+_OVERRIDE_IP = None
+
 KEYEVENTS = {
     # Navigation
     "up": "KEYCODE_DPAD_UP",
@@ -44,7 +49,16 @@ KEYEVENTS = {
 }
 
 
+# commands that target a specific device need `-s <ip:port>`, else
+# adb bails with "more than one device/emulator" when several are connected.
+_TARGET_CMDS = {"shell", "install", "uninstall", "push", "pull", "reboot"}
+
+
 def adb(*args, check=True, capture_output=False):
+    if args and args[0] in _TARGET_CMDS:
+        ip = get_ip()
+        if ip:
+            args = ("-s", f"{ip}:{PORT}") + args
     try:
         return subprocess.run(
             ["adb"] + list(args),
@@ -54,18 +68,43 @@ def adb(*args, check=True, capture_output=False):
         sys.exit("Error: adb not found. Install Android Platform Tools.")
 
 
-def get_ip():
+def load_cfg():
+    """Read config, migrating legacy {"ip": ...} on the fly."""
     try:
         cfg = json.loads(CONFIG_FILE.read_text())
-        return cfg.get("ip", "")
     except (FileNotFoundError, json.JSONDecodeError):
-        return ""
+        return {"devices": {}, "default": None}
+    if "ip" in cfg and "devices" not in cfg:
+        # migrate legacy single-IP config in memory; persisted on
+        # next save_device(). Upgrade: drop once all users have migrated.
+        return {"devices": {"default": cfg["ip"]}, "default": "default"}
+    cfg.setdefault("devices", {})
+    cfg.setdefault("default", next(iter(cfg["devices"]), None))
+    return cfg
 
 
-def save_ip(ip):
+def save_cfg(cfg):
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(json.dumps({"ip": ip}, indent=2) + "\n")
-    print(f"IP saved: {ip}")
+    CONFIG_FILE.write_text(json.dumps(cfg, indent=2) + "\n")
+
+
+def get_ip():
+    if _OVERRIDE_IP:
+        return _OVERRIDE_IP
+    cfg = load_cfg()
+    alias = cfg.get("default")
+    if not alias:
+        return ""
+    return cfg["devices"].get(alias, "")
+
+
+def save_device(alias, ip, make_default=True):
+    cfg = load_cfg()
+    cfg["devices"][alias] = ip
+    if make_default and not cfg.get("default"):
+        cfg["default"] = alias
+    save_cfg(cfg)
+    print(f"Saved {alias}: {ip}" + (" (default)" if cfg["default"] == alias else ""))
 
 
 def connected():
@@ -119,16 +158,79 @@ def cmd_status():
 
 
 def cmd_set_ip(ip):
-    save_ip(ip)
+    # Backward compat: set-ip => add default + use default.
+    cfg = load_cfg()
+    cfg["devices"]["default"] = ip
+    cfg["default"] = "default"
+    save_cfg(cfg)
+    print(f"IP saved: {ip}")
 
 
 def cmd_ip():
+    cfg = load_cfg()
+    # derive the active alias from override or cfg.default; both
+    # index into cfg["devices"]. Override path only matters for alias-prefijo.
+    alias = _OVERRIDE_IP and next(
+        (a for a, ip in cfg["devices"].items() if ip == _OVERRIDE_IP),
+        cfg.get("default"),
+    ) or cfg.get("default")
     ip = get_ip()
     if ip:
-        print(f"Configured IP: {ip}")
+        label = f" ({alias})" if alias and alias != "default" else ""
+        print(f"Configured IP: {ip}{label}")
     else:
-        print("No IP configured. Use: ftv set-ip <IP>")
+        print("No IP configured. Use: ftv add <alias> <IP>  (or: ftv set-ip <IP>)")
         sys.exit(1)
+
+
+# ---- device management ----
+
+RESERVED = set(KEYEVENTS) | {
+    "connect", "disconnect", "status", "set-ip", "ip",
+    "type", "screenshot", "shot", "launch", "open", "list", "apps",
+    "install", "reinstall", "uninstall", "stream", "cast",
+    "help", "-h", "--help",
+    "add", "devices", "use", "rm",
+}
+
+
+def cmd_add(alias, ip):
+    if alias in RESERVED:
+        sys.exit(f"Error: alias '{alias}' conflicts with a subcommand.")
+    save_device(alias, ip)
+
+
+def cmd_devices():
+    cfg = load_cfg()
+    devs = cfg.get("devices", {})
+    if not devs:
+        print("No devices configured. Use: ftv add <alias> <IP>")
+        return
+    default = cfg.get("default")
+    for alias, ip in devs.items():
+        mark = " *" if alias == default else ""
+        print(f"{alias:<12} {ip}{mark}")
+    print(f"\n* = default")
+
+
+def cmd_use(alias):
+    cfg = load_cfg()
+    if alias not in cfg["devices"]:
+        sys.exit(f"Error: no such device '{alias}'. Use: ftv devices")
+    cfg["default"] = alias
+    save_cfg(cfg)
+    print(f"Default set to {alias} ({cfg['devices'][alias]})")
+
+
+def cmd_rm(alias):
+    cfg = load_cfg()
+    if alias not in cfg["devices"]:
+        sys.exit(f"Error: no such device '{alias}'. Use: ftv devices")
+    del cfg["devices"][alias]
+    if cfg.get("default") == alias:
+        cfg["default"] = next(iter(cfg["devices"]), None)
+    save_cfg(cfg)
+    print(f"Removed {alias}")
 
 
 def cmd_type(text):
@@ -295,12 +397,20 @@ def cmd_stream(path):
 HELP = """\
 ftv - Control your Amazon Fire TV via ADB
 
+DEVICES:
+  ftv add <alias> <IP>       Add (or update) a Fire TV
+  ftv devices                List configured devices (* = default)
+  ftv use <alias>            Set the default device
+  ftv rm <alias>             Remove a device
+  ftv <alias> <command>      Run any command on a specific device
+                             e.g. ftv bedroom up
+
 CONNECTION:
-  ftv connect               Connect to the Fire TV
+  ftv connect               Connect to the default Fire TV
   ftv disconnect            Disconnect
   ftv status                Connection status (adb devices)
-  ftv set-ip <IP>           Save the Fire TV IP to config
-  ftv ip                    Show the configured IP
+  ftv set-ip <IP>           Save IP as the default device (legacy)
+  ftv ip                    Show the default device's IP
 
 NAVIGATION (remote control):
   ftv up | down | left | right
@@ -354,12 +464,25 @@ def cmd_help():
 # ---- dispatch ----
 
 def main():
+    global _OVERRIDE_IP
+
     if len(sys.argv) < 2:
         cmd_help()
         return
 
     cmd = sys.argv[1]
     args = sys.argv[2:]
+
+    # Alias-prefijo: si argv[1] es un dispositivo conocido y no es un
+    # subcomando reservado, usar ese dispositivo y despachar argv[2:].
+    if cmd not in RESERVED:
+        cfg = load_cfg()
+        if cmd in cfg.get("devices", {}):
+            _OVERRIDE_IP = cfg["devices"][cmd]
+            cmd = args[0] if args else ""
+            args = args[1:]
+            if not cmd:
+                sys.exit(f"Usage: ftv {sys.argv[1]} <command> [args]")
 
     if cmd in KEYEVENTS:
         keyevent(KEYEVENTS[cmd])
@@ -375,6 +498,20 @@ def main():
         cmd_set_ip(args[0])
     elif cmd == "ip":
         cmd_ip()
+    elif cmd == "add":
+        if len(args) < 2:
+            sys.exit("Usage: ftv add <alias> <IP>")
+        cmd_add(args[0], args[1])
+    elif cmd == "devices":
+        cmd_devices()
+    elif cmd == "use":
+        if not args:
+            sys.exit("Usage: ftv use <alias>")
+        cmd_use(args[0])
+    elif cmd == "rm":
+        if not args:
+            sys.exit("Usage: ftv rm <alias>")
+        cmd_rm(args[0])
     elif cmd == "type":
         if not args:
             sys.exit('Usage: ftv type "<text>"')

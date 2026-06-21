@@ -97,21 +97,58 @@ Check the connection:
 ftv status
 ```
 
+### Multiple devices
+
+`ftv` can store several Fire TVs, each with an alias. The first one you add
+becomes the default.
+
+```sh
+ftv add bedroom 192.0.2.10
+ftv add living  192.0.2.11
+ftv devices               # list (bedroom is the default, marked with *)
+ftv use living            # switch the default
+ftv rm bedroom            # remove a device
+```
+
+Run any command on a specific device by prefixing its alias:
+
+```sh
+ftv bedroom up
+ftv living launch com.example.app
+ftv living stream ~/Videos/movie.mkv
+```
+
+Without a prefix, commands go to the default device:
+
+```sh
+ftv up                    # uses the default
+```
+
 ## Usage
 
 ```
 ftv <subcommand> [arguments]
 ```
 
+### Devices
+
+| Command | Description |
+|---------|-------------|
+| `ftv add <alias> <IP>` | Add (or update) a Fire TV |
+| `ftv devices` | List configured devices (`*` marks the default) |
+| `ftv use <alias>` | Set the default device |
+| `ftv rm <alias>` | Remove a device |
+| `ftv <alias> <command>` | Run any command on a specific device |
+
 ### Connection
 
 | Command | Description |
 |---------|-------------|
-| `ftv connect` | Connect to the Fire TV |
+| `ftv connect` | Connect to the default Fire TV |
 | `ftv disconnect` | Disconnect |
 | `ftv status` | Show connection status (`adb devices -l`) |
-| `ftv set-ip <IP>` | Save the Fire TV IP to config |
-| `ftv ip` | Show the configured IP |
+| `ftv set-ip <IP>` | Save IP as the default device (legacy) |
+| `ftv ip` | Show the default device's IP |
 
 ### Navigation (remote control)
 
