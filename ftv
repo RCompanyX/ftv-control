@@ -275,6 +275,9 @@ def cmd_stream(path):
 
             return _Lim()
 
+    # kill stale server from a previous run (macOS lsof); without
+    # this, rebinding fails with EADDRINUSE after Ctrl+C leaves threads alive.
+    subprocess.run(["sh", "-c", f"lsof -ti :{port} | xargs kill -9 2>/dev/null"])
     with http.server.ThreadingHTTPServer(("", port), _RangeHandler) as httpd:
         try:
             httpd.serve_forever()
