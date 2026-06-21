@@ -215,10 +215,6 @@ def cmd_stream(path):
     port = 8765  # fixed port, pass as arg if a clash ever happens
     url = f"http://{host_ip}:{port}/stream"
     print(f"Streaming {file.name} to Fire TV...")
-    adb("shell", "am", "start", "-a", "android.intent.action.VIEW",
-        "-d", url, "-t", "video/*", capture_output=True, check=False)
-    print(f"Serving on {url}")
-    print("Press Ctrl+C to stop.")
 
     # stdlib SimpleHTTPRequestHandler has no Range support; MKV puts
     # its SeekHead at EOF, so VLC needs partial-content requests to start.
@@ -279,6 +275,12 @@ def cmd_stream(path):
     # this, rebinding fails with EADDRINUSE after Ctrl+C leaves threads alive.
     subprocess.run(["sh", "-c", f"lsof -ti :{port} | xargs kill -9 2>/dev/null"])
     with http.server.ThreadingHTTPServer(("", port), _RangeHandler) as httpd:
+        # Launch VLC AFTER the server is listening, so VLC's first connection
+        # doesn't get refused.
+        adb("shell", "am", "start", "-a", "android.intent.action.VIEW",
+            "-d", url, "-t", "video/*", capture_output=True, check=False)
+        print(f"Serving on {url}")
+        print("Press Ctrl+C to stop.")
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
