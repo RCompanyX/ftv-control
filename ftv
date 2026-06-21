@@ -1,204 +1,226 @@
-#!/usr/bin/env python3
-"""ftv - Control your Amazon Fire TV via ADB."""
+#!/usr/bin/env bash
+# ftv - Control your Amazon Fire TV via ADB
+# Usage: ftv <subcommand> [arguments]
+# Config: ~/.config/ftv/config (contains the Fire TV IP)
 
-import json
-import subprocess
-import sys
-from datetime import datetime
-from pathlib import Path
+set -euo pipefail
 
-CONFIG_DIR = Path.home() / ".config" / "ftv"
-CONFIG_FILE = CONFIG_DIR / "config.json"
-PORT = 5555
+CONFIG_DIR="${HOME}/.config/ftv"
+CONFIG_FILE="${CONFIG_DIR}/config"
+PORT=5555
 
-KEYEVENTS = {
-    # Navigation
-    "up": "KEYCODE_DPAD_UP",
-    "down": "KEYCODE_DPAD_DOWN",
-    "left": "KEYCODE_DPAD_LEFT",
-    "right": "KEYCODE_DPAD_RIGHT",
-    "ok": "KEYCODE_DPAD_CENTER",
-    "center": "KEYCODE_DPAD_CENTER",
-    "back": "KEYCODE_BACK",
-    "home": "KEYCODE_HOME",
-    "menu": "KEYCODE_MENU",
-    # Media
-    "play": "KEYCODE_MEDIA_PLAY_PAUSE",
-    "fwd": "KEYCODE_MEDIA_FAST_FORWARD",
-    "rew": "KEYCODE_MEDIA_REWIND",
-    "next": "KEYCODE_MEDIA_NEXT",
-    "prev": "KEYCODE_MEDIA_PREVIOUS",
-    "volup": "KEYCODE_VOLUME_UP",
-    "voldown": "KEYCODE_VOLUME_DOWN",
-    "mute": "KEYCODE_VOLUME_MUTE",
-    # Keyboard
-    "enter": "KEYCODE_ENTER",
-    "del": "KEYCODE_DEL",
-    # Power
-    "on": "KEYCODE_WAKEUP",
-    "wake": "KEYCODE_WAKEUP",
-    "off": "KEYCODE_SLEEP",
-    "sleep": "KEYCODE_SLEEP",
-    "toggle": "KEYCODE_POWER",
-    "power": "KEYCODE_POWER",
+ftv_get_ip() {
+  if [[ -f "${CONFIG_FILE}" ]]; then
+    head -1 "${CONFIG_FILE}" | tr -d '[:space:]'
+  else
+    echo ""
+  fi
 }
 
+ftv_save_ip() {
+  local ip="$1"
+  mkdir -p "${CONFIG_DIR}"
+  echo "${ip}" > "${CONFIG_FILE}"
+  echo "IP saved: ${ip}"
+}
 
-def adb(*args, check=True, capture_output=False):
-    try:
-        return subprocess.run(
-            ["adb"] + list(args),
-            check=check, capture_output=capture_output, text=True,
-        )
-    except FileNotFoundError:
-        sys.exit("Error: adb not found. Install Android Platform Tools.")
+ftv_connected() {
+  local ip
+  ip="$(ftv_get_ip)"
+  [[ -z "${ip}" ]] && return 1
+  adb devices 2>/dev/null | grep -q "${ip}:${PORT}.*device"
+}
 
+ftv_ensure_connected() {
+  local ip
+  ip="$(ftv_get_ip)"
+  if [[ -z "${ip}" ]]; then
+    echo "Error: no IP configured. Use: ftv set-ip <IP>" >&2
+    return 1
+  fi
+  if ! ftv_connected; then
+    echo "Connecting to ${ip}:${PORT}..." >&2
+    adb connect "${ip}:${PORT}" >/dev/null 2>&1 || true
+    sleep 1
+    if ! ftv_connected; then
+      echo "Error: could not connect to ${ip}:${PORT}" >&2
+      echo "Make sure the Fire TV is on and ADB Debugging is enabled." >&2
+      return 1
+    fi
+  fi
+}
 
-def get_ip():
-    try:
-        cfg = json.loads(CONFIG_FILE.read_text())
-        return cfg.get("ip", "")
-    except (FileNotFoundError, json.JSONDecodeError):
-        return ""
+ftv_keyevent() {
+  ftv_ensure_connected || return 1
+  adb shell input keyevent "$1"
+}
 
+# ===== Subcommands =====
 
-def save_ip(ip):
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(json.dumps({"ip": ip}, indent=2) + "\n")
-    print(f"IP saved: {ip}")
+ftv_connect() {
+  local ip
+  ip="$(ftv_get_ip)"
+  if [[ -z "${ip}" ]]; then
+    echo "Error: no IP configured. Use: ftv set-ip <IP>" >&2
+    return 1
+  fi
+  adb connect "${ip}:${PORT}"
+}
 
+ftv_disconnect() {
+  local ip
+  ip="$(ftv_get_ip)"
+  if [[ -n "${ip}" ]]; then
+    adb disconnect "${ip}:${PORT}"
+  else
+    adb disconnect
+  fi
+}
 
-def connected():
-    ip = get_ip()
-    if not ip:
-        return False
-    r = adb("devices", capture_output=True, check=False)
-    target = f"{ip}:{PORT}"
-    return any(target in line and line.rstrip().endswith("\tdevice")
-               for line in r.stdout.splitlines())
+ftv_status() {
+  adb devices -l
+}
 
+ftv_set_ip() {
+  if [[ $# -lt 1 ]]; then
+    echo "Usage: ftv set-ip <IP>" >&2
+    return 1
+  fi
+  ftv_save_ip "$1"
+}
 
-def ensure_connected():
-    ip = get_ip()
-    if not ip:
-        sys.exit("Error: no IP configured. Use: ftv set-ip <IP>")
-    if not connected():
-        print(f"Connecting to {ip}:{PORT}...", file=sys.stderr)
-        adb("connect", f"{ip}:{PORT}", check=False, capture_output=True)
-        if not connected():
-            sys.exit(
-                f"Error: could not connect to {ip}:{PORT}\n"
-                "Make sure the Fire TV is on and ADB Debugging is enabled."
-            )
+ftv_ip() {
+  local ip
+  ip="$(ftv_get_ip)"
+  if [[ -n "${ip}" ]]; then
+    echo "Configured IP: ${ip}"
+  else
+    echo "No IP configured. Use: ftv set-ip <IP>"
+    return 1
+  fi
+}
 
+ftv_type() {
+  if [[ $# -lt 1 ]]; then
+    echo "Usage: ftv type \"<text>\"" >&2
+    return 1
+  fi
+  ftv_ensure_connected || return 1
+  adb shell input text "$1"
+}
 
-def keyevent(code):
-    ensure_connected()
-    adb("shell", "input", "keyevent", code)
+ftv_screenshot() {
+  local out
+  if [[ $# -ge 1 ]]; then
+    out="$1"
+  else
+    out="${HOME}/Desktop/firetv_$(date +%Y%m%d_%H%M%S).png"
+  fi
+  ftv_ensure_connected || return 1
+  adb shell screencap -p /sdcard/ftv_shot.png \
+    && adb pull /sdcard/ftv_shot.png "${out}" \
+    && adb shell rm /sdcard/ftv_shot.png \
+    && echo "Screenshot saved to: ${out}"
+}
 
+ftv_launch() {
+  local pkg activity
+  if [[ $# -lt 1 ]]; then
+    echo "Usage: ftv launch <package>" >&2
+    return 1
+  fi
+  pkg="$1"
+  ftv_ensure_connected || return 1
+  # Try monkey first (standard LAUNCHER category)
+  if adb shell monkey -p "${pkg}" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; then
+    echo "App ${pkg} launched."
+    return 0
+  fi
+  # monkey failed: resolve the MAIN activity and launch with am start
+  activity="$(adb shell dumpsys package "${pkg}" 2>/dev/null \
+    | grep -A1 'android.intent.action.MAIN' \
+    | grep -oE "${pkg}/[A-Za-z0-9._]+" | head -1)"
+  if [[ -n "${activity}" ]]; then
+    adb shell am start -n "${activity}" >/dev/null 2>&1 \
+      && echo "App ${pkg} launched via am start (${activity})." \
+      && return 0
+  fi
+  echo "Error: could not launch ${pkg}. No MAIN activity found." >&2
+  return 1
+}
 
-# ---- subcommands ----
+ftv_list() {
+  ftv_ensure_connected || return 1
+  if [[ "${1:-}" == "--third" || "${1:-}" == "-3" ]]; then
+    adb shell pm list packages -3
+  else
+    adb shell pm list packages
+  fi
+}
 
-def cmd_connect():
-    ip = get_ip()
-    if not ip:
-        sys.exit("Error: no IP configured. Use: ftv set-ip <IP>")
-    adb("connect", f"{ip}:{PORT}")
+ftv_install() {
+  if [[ $# -lt 1 ]]; then
+    echo "Usage: ftv install <apk-path>" >&2
+    return 1
+  fi
+  ftv_ensure_connected || return 1
+  adb install "$1"
+}
 
+ftv_reinstall() {
+  if [[ $# -lt 1 ]]; then
+    echo "Usage: ftv reinstall <apk-path>" >&2
+    return 1
+  fi
+  ftv_ensure_connected || return 1
+  adb install -r "$1"
+}
 
-def cmd_disconnect():
-    ip = get_ip()
-    if ip:
-        adb("disconnect", f"{ip}:{PORT}")
-    else:
-        adb("disconnect")
+ftv_uninstall() {
+  if [[ $# -lt 1 ]]; then
+    echo "Usage: ftv uninstall <package>" >&2
+    return 1
+  fi
+  ftv_ensure_connected || return 1
+  adb uninstall "$1"
+}
 
+ftv_get_host_ip() {
+  local tv_ip="$1"
+  python3 -c "
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.connect(('${tv_ip}', 1))
+print(s.getsockname()[0])
+"
+}
 
-def cmd_status():
-    adb("devices", "-l")
+ftv_stream() {
+  if [[ $# -lt 1 ]]; then
+    echo "Usage: ftv stream <video-file>" >&2
+    return 1
+  fi
+  local file="$1"
+  [[ -f "$file" ]] || { echo "Error: $file not found" >&2; return 1; }
+  ftv_ensure_connected || return 1
 
+  local host_ip dir fname url port=8765
+  # fixed port, pass as arg if a clash ever happens
+  host_ip="$(ftv_get_host_ip "$(ftv_get_ip)")"
+  dir="$(dirname "$file")"
+  fname="$(basename "$file")"
+  url="http://${host_ip}:${port}/$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "${fname}")"
 
-def cmd_set_ip(ip):
-    save_ip(ip)
+  echo "Streaming ${fname} to Fire TV..."
+  adb shell am start -a android.intent.action.VIEW -d "${url}" -t "video/*" >/dev/null 2>&1
 
+  echo "Serving on ${url}"
+  echo "Press Ctrl+C to stop."
+  (cd "${dir}" && python3 -m http.server ${port})
+}
 
-def cmd_ip():
-    ip = get_ip()
-    if ip:
-        print(f"Configured IP: {ip}")
-    else:
-        print("No IP configured. Use: ftv set-ip <IP>")
-        sys.exit(1)
-
-
-def cmd_type(text):
-    ensure_connected()
-    adb("shell", "input", "text", text)
-
-
-def cmd_screenshot(path=None):
-    if path:
-        out = path
-    else:
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out = str(Path.home() / "Desktop" / f"firetv_{ts}.png")
-    ensure_connected()
-    adb("shell", "screencap", "-p", "/sdcard/ftv_shot.png")
-    adb("pull", "/sdcard/ftv_shot.png", out)
-    adb("shell", "rm", "/sdcard/ftv_shot.png")
-    print(f"Screenshot saved to: {out}")
-
-
-def cmd_launch(pkg):
-    ensure_connected()
-    # Try monkey first (standard LAUNCHER category)
-    r = adb(
-        "shell", "monkey", "-p", pkg,
-        "-c", "android.intent.category.LAUNCHER", "1",
-        capture_output=True, check=False,
-    )
-    if r.returncode == 0:
-        print(f"App {pkg} launched.")
-        return
-    # monkey failed: resolve MAIN activity and launch with am start
-    r = adb(
-        "shell", "dumpsys", "package", pkg,
-        capture_output=True, check=False,
-    )
-    import re
-    m = re.search(rf"{re.escape(pkg)}/([A-Za-z0-9._]+)", r.stdout)
-    if m:
-        activity = f"{pkg}/{m.group(1)}"
-        adb("shell", "am", "start", "-n", activity, capture_output=True)
-        print(f"App {pkg} launched via am start ({activity}).")
-        return
-    sys.exit(f"Error: could not launch {pkg}. No MAIN activity found.")
-
-
-def cmd_list(third_only=False):
-    ensure_connected()
-    args = ["shell", "pm", "list", "packages"]
-    if third_only:
-        args.append("-3")
-    adb(*args)
-
-
-def cmd_install(apk):
-    ensure_connected()
-    adb("install", apk)
-
-
-def cmd_reinstall(apk):
-    ensure_connected()
-    adb("install", "-r", apk)
-
-
-def cmd_uninstall(pkg):
-    ensure_connected()
-    adb("uninstall", pkg)
-
-
-HELP = """\
+ftv_help() {
+  cat <<'EOF'
 ftv - Control your Amazon Fire TV via ADB
 
 CONNECTION:
@@ -245,71 +267,71 @@ APPS:
   ftv reinstall <apk>       Reinstall, keeping data
   ftv uninstall <package>   Uninstall an app
 
+STREAMING:
+  ftv stream <video-file>  Stream a video file to Fire TV via VLC
+
 OTHERS:
   ftv help                  Show this help
-"""
+EOF
+}
 
+# ===== Dispatch =====
 
-def cmd_help():
-    print(HELP)
+main() {
+  local cmd="${1:-help}"
+  shift || true
 
+  case "${cmd}" in
+    # Connection
+    connect)     ftv_connect "$@" ;;
+    disconnect)  ftv_disconnect "$@" ;;
+    status)      ftv_status "$@" ;;
+    set-ip)      ftv_set_ip "$@" ;;
+    ip)          ftv_ip "$@" ;;
+    # Navigation
+    up)          ftv_keyevent KEYCODE_DPAD_UP ;;
+    down)        ftv_keyevent KEYCODE_DPAD_DOWN ;;
+    left)        ftv_keyevent KEYCODE_DPAD_LEFT ;;
+    right)       ftv_keyevent KEYCODE_DPAD_RIGHT ;;
+    ok|center)   ftv_keyevent KEYCODE_DPAD_CENTER ;;
+    back)        ftv_keyevent KEYCODE_BACK ;;
+    home)        ftv_keyevent KEYCODE_HOME ;;
+    menu)        ftv_keyevent KEYCODE_MENU ;;
+    # Media
+    play)        ftv_keyevent KEYCODE_MEDIA_PLAY_PAUSE ;;
+    fwd)         ftv_keyevent KEYCODE_MEDIA_FAST_FORWARD ;;
+    rew)         ftv_keyevent KEYCODE_MEDIA_REWIND ;;
+    next)        ftv_keyevent KEYCODE_MEDIA_NEXT ;;
+    prev)        ftv_keyevent KEYCODE_MEDIA_PREVIOUS ;;
+    volup)       ftv_keyevent KEYCODE_VOLUME_UP ;;
+    voldown)     ftv_keyevent KEYCODE_VOLUME_DOWN ;;
+    mute)        ftv_keyevent KEYCODE_VOLUME_MUTE ;;
+    # Keyboard
+    type)        ftv_type "$@" ;;
+    enter)       ftv_keyevent KEYCODE_ENTER ;;
+    del)         ftv_keyevent KEYCODE_DEL ;;
+    # Power
+    on|wake)     ftv_keyevent KEYCODE_WAKEUP ;;
+    off|sleep)   ftv_keyevent KEYCODE_SLEEP ;;
+    toggle|power) ftv_keyevent KEYCODE_POWER ;;
+    # Screenshot
+    screenshot|shot) ftv_screenshot "$@" ;;
+    # Apps
+    launch|open) ftv_launch "$@" ;;
+    list|apps)   ftv_list "$@" ;;
+    install)     ftv_install "$@" ;;
+    reinstall)   ftv_reinstall "$@" ;;
+    uninstall)  ftv_uninstall "$@" ;;
+    # Streaming
+    stream|cast) ftv_stream "$@" ;;
+    # Help
+    help|-h|--help) ftv_help ;;
+    *)
+      echo "Error: unknown subcommand '${cmd}'" >&2
+      echo "Use 'ftv help' to see available options." >&2
+      exit 1
+      ;;
+  esac
+}
 
-# ---- dispatch ----
-
-def main():
-    if len(sys.argv) < 2:
-        cmd_help()
-        return
-
-    cmd = sys.argv[1]
-    args = sys.argv[2:]
-
-    if cmd in KEYEVENTS:
-        keyevent(KEYEVENTS[cmd])
-    elif cmd == "connect":
-        cmd_connect()
-    elif cmd == "disconnect":
-        cmd_disconnect()
-    elif cmd == "status":
-        cmd_status()
-    elif cmd == "set-ip":
-        if not args:
-            sys.exit("Usage: ftv set-ip <IP>")
-        cmd_set_ip(args[0])
-    elif cmd == "ip":
-        cmd_ip()
-    elif cmd == "type":
-        if not args:
-            sys.exit('Usage: ftv type "<text>"')
-        cmd_type(args[0])
-    elif cmd in ("screenshot", "shot"):
-        cmd_screenshot(args[0] if args else None)
-    elif cmd in ("launch", "open"):
-        if not args:
-            sys.exit("Usage: ftv launch <package>")
-        cmd_launch(args[0])
-    elif cmd in ("list", "apps"):
-        third = args and args[0] in ("--third", "-3")
-        cmd_list(third)
-    elif cmd == "install":
-        if not args:
-            sys.exit("Usage: ftv install <apk-path>")
-        cmd_install(args[0])
-    elif cmd == "reinstall":
-        if not args:
-            sys.exit("Usage: ftv reinstall <apk-path>")
-        cmd_reinstall(args[0])
-    elif cmd == "uninstall":
-        if not args:
-            sys.exit("Usage: ftv uninstall <package>")
-        cmd_uninstall(args[0])
-    elif cmd in ("help", "-h", "--help"):
-        cmd_help()
-    else:
-        print(f"Error: unknown subcommand '{cmd}'", file=sys.stderr)
-        print("Use 'ftv help' to see available options.", file=sys.stderr)
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
+main "$@"
