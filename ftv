@@ -275,6 +275,11 @@ def cmd_stream(path):
     # this, rebinding fails with EADDRINUSE after Ctrl+C leaves threads alive.
     subprocess.run(["sh", "-c", f"lsof -ti :{port} | xargs kill -9 2>/dev/null"])
     with http.server.ThreadingHTTPServer(("", port), _RangeHandler) as httpd:
+        # Force-stop VLC first: a stale VLC process can't reinitialize its
+        # NativeWindow video surface, causing instant crash on replay.
+        adb("shell", "am", "force-stop", "org.videolan.vlc",
+            capture_output=True, check=False)
+        import time; time.sleep(0.5)
         # Launch VLC AFTER the server is listening, so VLC's first connection
         # doesn't get refused.
         adb("shell", "am", "start", "-a", "android.intent.action.VIEW",
