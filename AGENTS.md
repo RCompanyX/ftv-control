@@ -25,11 +25,18 @@ IP is stored in `~/.config/ftv/config` (not in the repo).
 ## Gotchas
 
 - **Two copies of the script:** the repo copy (`./ftv`) and the live copy
-  (`~/bin/ftv`). Edit the repo copy, then sync with `cp ftv ~/bin/ftv` to test
-  against a real device.
+  (`~/bin/ftv`). Edit the repo copy, then sync on request with
+  `cp ftv ~/bin/ftv` to test against a real device.
 - **No copyrighted references:** examples in `README.md` and code comments must
   not name real apps, movies, or brands. Use generic placeholders
   (e.g. `com.example.app`).
+
+## Confirmation required
+
+- **Copy to live:** never `cp ftv ~/bin/ftv` without the user explicitly asking
+  for it. Only copy when asked.
+- **Commit:** never `git commit` without the user explicitly asking for it.
+- **Push:** never `git push` without the user explicitly asking for it.
 
 ## Script architecture
 
