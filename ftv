@@ -133,13 +133,12 @@ def keyevent(code):
     adb("shell", "input", "keyevent", code)
 
 
-# on/off build a realistic remote sequence + verify wakefulness via
-# dumpsys. CEC (turning the real TV on/off) is handled by the Fire TV's built-in
-# HDMI control: KEYCODE_WAKEUP sends <Text View On>/<Active Source> to the TV,
-# KEYCODE_SLEEP sends vendor power-down. Fires automatically when mHdmiControl
-# Enabled=true. KEYCODE_TV_POWER is dead on Fire OS (no CEC output), so no
-# --cec flag. Deep sleep may drop ADB-WiFi; pre-connect is best-effort, if it
-# fails the device is out of ADB reach (hardware limit).
+# on/off force a sleep↔wake transition so the Fire TV's HDMI control
+# fires CEC: WAKEUP when already awake = no CEC (no OTP to TV); SLEEP when
+# already asleep = no CEC (no power-down to TV). So we check wakefulness first
+# and force the opposite transition only when needed, avoiding TV flicker.
+# KEYCODE_TV_POWER is dead on Fire OS. Deep sleep may drop ADB-WiFi; pre-connect
+# is best-effort, if it fails the device is out of ADB reach (hardware limit).
 def _wakefulness():
     r = adb("shell", "dumpsys", "power", capture_output=True, check=False)
     for line in r.stdout.splitlines():
@@ -153,6 +152,9 @@ def cmd_on():
     ip = get_ip()
     if ip:
         adb("connect", f"{ip}:{PORT}", check=False, capture_output=True)
+    if _wakefulness() == "Awake":
+        keyevent("KEYCODE_SLEEP")  # force transition: WAKEUP alone sends no CEC
+        time.sleep(1)
     keyevent("KEYCODE_WAKEUP")
     time.sleep(0.5)
     keyevent("KEYCODE_HOME")
@@ -160,6 +162,9 @@ def cmd_on():
 
 
 def cmd_off():
+    if _wakefulness() == "Asleep":
+        keyevent("KEYCODE_WAKEUP")  # force transition: SLEEP alone sends no CEC
+        time.sleep(1)
     keyevent("KEYCODE_SLEEP")
     print(f"Fire TV: {_wakefulness().lower()}")
 
