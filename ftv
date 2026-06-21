@@ -202,8 +202,6 @@ def cmd_stream(path):
     import http.server
     import os
     import socket
-    from functools import partial
-    from urllib.parse import quote
 
     file = Path(path).resolve()
     if not file.is_file():
@@ -215,7 +213,7 @@ def cmd_stream(path):
     host_ip = s.getsockname()[0]
     s.close()
     port = 8765  # fixed port, pass as arg if a clash ever happens
-    url = f"http://{host_ip}:{port}/{quote(file.name)}"
+    url = f"http://{host_ip}:{port}/stream"
     print(f"Streaming {file.name} to Fire TV...")
     adb("shell", "am", "start", "-a", "android.intent.action.VIEW",
         "-d", url, "-t", "video/*", capture_output=True, check=False)
@@ -225,8 +223,12 @@ def cmd_stream(path):
     # stdlib SimpleHTTPRequestHandler has no Range support; MKV puts
     # its SeekHead at EOF, so VLC needs partial-content requests to start.
     # Minimal 206 handler below; no 416/validation, VLC never sends bad ranges.
+    # URL is fixed to /stream: VLC Android chokes on %-encoded brackets/plus.
     class _RangeHandler(http.server.SimpleHTTPRequestHandler):
         protocol_version = "HTTP/1.1"  # 206 Partial Content requires HTTP/1.1
+
+        def translate_path(self, path):
+            return str(file)  # serve the target file regardless of URL
 
         def send_head(self):
             p = self.translate_path(self.path)
@@ -253,6 +255,8 @@ def cmd_stream(path):
             self.send_header("Content-Type", self.guess_type(p))
             self.send_header("Content-Length", str(end - start + 1))
             self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Connection", "close")
+            self.close_connection = True
             self.end_headers()
             f.seek(start)
             remaining = [end - start + 1]
@@ -271,8 +275,7 @@ def cmd_stream(path):
 
             return _Lim()
 
-    handler = partial(_RangeHandler, directory=str(file.parent))
-    with http.server.ThreadingHTTPServer(("", port), handler) as httpd:
+    with http.server.ThreadingHTTPServer(("", port), _RangeHandler) as httpd:
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
