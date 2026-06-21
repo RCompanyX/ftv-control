@@ -41,6 +41,11 @@ category first, then falls back to resolving the app's MAIN activity via
 `dumpsys` and launching with `am start`. This fallback exists because some
 Fire TV apps (e.g. streaming apps) don't expose a LAUNCHER category.
 
+`ftv stream` deduces the host's LAN IP with a no-send UDP socket trick,
+launches VLC on the Fire TV with an `am start VIEW` intent pointing at an
+`http.server` it runs on port 8765, and blocks serving the file until
+interrupted. Port is fixed; raise as an arg if it ever clashes.
+
 ## Repo
 
 Default branch is `main`.

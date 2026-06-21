@@ -14,6 +14,7 @@ screenshots, and more — all from your Mac or Linux terminal over WiFi.
 - Power on/off/sleep/wake
 - Take screenshots to your Desktop (or custom path)
 - Install, uninstall, list, and launch apps (APK sideloading supported)
+- Stream local video files to VLC on the Fire TV (no storage used on device)
 - Auto-reconnect: re-establishes the ADB connection if it drops
 - No dependencies beyond Python 3 and `adb` (Android Platform Tools)
 - Config stored in `~/.config/ftv/config.json` (no shell profile pollution)
@@ -167,6 +168,17 @@ ftv <subcommand> [arguments]
 | `ftv reinstall <apk>` | Reinstall an APK, keeping data |
 | `ftv uninstall <package>` | Uninstall an app |
 
+### Streaming
+
+| Command | Description |
+|---------|-------------|
+| `ftv stream <video-file>` | Stream a local video file to VLC on the Fire TV |
+
+`ftv stream` starts a temporary HTTP server on your machine and opens the file
+in VLC on the Fire TV, so the video plays over the network without copying it
+to the device's limited storage. VLC must be installed on the Fire TV. Stop the
+server with `Ctrl+C` when you're done watching.
+
 ### Other
 
 | Command | Description |
@@ -216,9 +228,9 @@ attempts to reconnect before sending the command — so you don't need to run
 
 - If your Fire TV's IP changes (e.g. due to DHCP), update it with
   `ftv set-ip <new-IP>`.
-- Screen mirroring / casting is not included in this script. For that, consider
-  an alternative screen-mirroring/casting app
-  other screen-mirroring/casting tools.
+- Screen mirroring is not included in this script. For that, consider
+  an alternative screen-mirroring/casting app.
+  For playing local video files, use `ftv stream` (requires VLC on the Fire TV).
 - `ftv launch` tries the standard `monkey` launcher first; if that fails
   (some Fire TV apps don't expose a LAUNCHER category), it automatically
   resolves the app's MAIN activity and launches it via `am start`.
