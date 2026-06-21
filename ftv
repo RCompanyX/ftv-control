@@ -4,6 +4,7 @@
 import json
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -40,10 +41,6 @@ KEYEVENTS = {
     "enter": "KEYCODE_ENTER",
     "del": "KEYCODE_DEL",
     # Power
-    "on": "KEYCODE_WAKEUP",
-    "wake": "KEYCODE_WAKEUP",
-    "off": "KEYCODE_SLEEP",
-    "sleep": "KEYCODE_SLEEP",
     "toggle": "KEYCODE_POWER",
     "power": "KEYCODE_POWER",
 }
@@ -136,6 +133,37 @@ def keyevent(code):
     adb("shell", "input", "keyevent", code)
 
 
+# on/off build a realistic remote sequence + verify wakefulness via
+# dumpsys. CEC (turning the real TV on/off) is handled by the Fire TV's built-in
+# HDMI control: KEYCODE_WAKEUP sends <Text View On>/<Active Source> to the TV,
+# KEYCODE_SLEEP sends vendor power-down. Fires automatically when mHdmiControl
+# Enabled=true. KEYCODE_TV_POWER is dead on Fire OS (no CEC output), so no
+# --cec flag. Deep sleep may drop ADB-WiFi; pre-connect is best-effort, if it
+# fails the device is out of ADB reach (hardware limit).
+def _wakefulness():
+    r = adb("shell", "dumpsys", "power", capture_output=True, check=False)
+    for line in r.stdout.splitlines():
+        line = line.strip()
+        if line.startswith("mWakefulness="):
+            return line.split("=", 1)[1]
+    return "Unknown"
+
+
+def cmd_on():
+    ip = get_ip()
+    if ip:
+        adb("connect", f"{ip}:{PORT}", check=False, capture_output=True)
+    keyevent("KEYCODE_WAKEUP")
+    time.sleep(0.5)
+    keyevent("KEYCODE_HOME")
+    print(f"Fire TV: {_wakefulness().lower()}")
+
+
+def cmd_off():
+    keyevent("KEYCODE_SLEEP")
+    print(f"Fire TV: {_wakefulness().lower()}")
+
+
 # ---- subcommands ----
 
 def cmd_connect():
@@ -191,6 +219,7 @@ RESERVED = set(KEYEVENTS) | {
     "install", "reinstall", "uninstall", "stream", "cast",
     "help", "-h", "--help",
     "add", "devices", "use", "rm",
+    "on", "wake", "off", "sleep",
 }
 
 
@@ -381,7 +410,7 @@ def cmd_stream(path):
         # NativeWindow video surface, causing instant crash on replay.
         adb("shell", "am", "force-stop", "org.videolan.vlc",
             capture_output=True, check=False)
-        import time; time.sleep(0.5)
+        time.sleep(0.5)
         # Launch VLC AFTER the server is listening, so VLC's first connection
         # doesn't get refused.
         adb("shell", "am", "start", "-a", "android.intent.action.VIEW",
@@ -435,8 +464,8 @@ KEYBOARD:
   ftv del                   Delete
 
 POWER:
-  ftv on                    Wake up
-  ftv off                   Sleep
+  ftv on                    Wake up (+ CEC: turns on the TV via HDMI control)
+  ftv off                   Sleep (+ CEC: powers down the TV via HDMI control)
   ftv toggle                Toggle power
 
 SCREENSHOT:
@@ -486,6 +515,10 @@ def main():
 
     if cmd in KEYEVENTS:
         keyevent(KEYEVENTS[cmd])
+    elif cmd in ("on", "wake"):
+        cmd_on()
+    elif cmd in ("off", "sleep"):
+        cmd_off()
     elif cmd == "connect":
         cmd_connect()
     elif cmd == "disconnect":
