@@ -275,3 +275,9 @@ attempts to reconnect before sending the command — so you don't need to run
 ## License
 
 [MIT](LICENSE)
+
+## Trademarks
+
+Amazon, Fire TV, Fire OS, and Android are trademarks of their respective
+owners. VLC is a trademark of the VideoLAN organization. This project is not
+affiliated with, endorsed by, or sponsored by any of these trademark holders.

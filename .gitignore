@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 *.pyo
+
+# Local backup of pre-rewrite history (not for the repo)
+backup-pre-public.bundle

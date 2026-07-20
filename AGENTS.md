@@ -20,7 +20,7 @@ There is no test suite. Verify changes in two steps:
    ```
 
 A Fire TV with ADB Debugging enabled must be on the same network. The Fire TV's
-IP is stored in `~/.config/ftv/config` (not in the repo).
+IP is stored in `~/.config/ftv/config.json` (not in the repo).
 
 ## Gotchas
 
