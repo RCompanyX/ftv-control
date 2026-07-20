@@ -12,9 +12,9 @@ CONFIG_DIR = Path.home() / ".config" / "ftv"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 PORT = 5555
 
-# module-global IP override for alias-prefijo dispatch. Not
-# thread-safe, but the script is single-threaded. Upgrade: pass ip through
-# every cmd_* if we ever go concurrent.
+# Module-global IP override for alias-prefixed dispatch. Not thread-safe, but
+# the script is single-threaded. Upgrade: pass ip through every cmd_* if we
+# ever go concurrent.
 _OVERRIDE_IP = None
 
 KEYEVENTS = {
@@ -46,8 +46,8 @@ KEYEVENTS = {
 }
 
 
-# commands that target a specific device need `-s <ip:port>`, else
-# adb bails with "more than one device/emulator" when several are connected.
+# Commands that target a specific device need `-s <ip:port>`, else adb bails
+# with "more than one device/emulator" when several are connected.
 _TARGET_CMDS = {"shell", "install", "uninstall", "push", "pull", "reboot"}
 
 
@@ -72,8 +72,8 @@ def load_cfg():
     except (FileNotFoundError, json.JSONDecodeError):
         return {"devices": {}, "default": None}
     if "ip" in cfg and "devices" not in cfg:
-        # migrate legacy single-IP config in memory; persisted on
-        # next save_device(). Upgrade: drop once all users have migrated.
+        # Migrate legacy single-IP config in memory; persisted on next
+        # save_device(). Upgrade: drop once all users have migrated.
         return {"devices": {"default": cfg["ip"]}, "default": "default"}
     cfg.setdefault("devices", {})
     cfg.setdefault("default", next(iter(cfg["devices"]), None))
@@ -133,10 +133,10 @@ def keyevent(code):
     adb("shell", "input", "keyevent", code)
 
 
-# on/off force a sleep↔wake transition so the Fire TV's HDMI control
-# fires CEC: WAKEUP when already awake = no CEC (no OTP to TV); SLEEP when
-# already asleep = no CEC (no power-down to TV). So we check wakefulness first
-# and force the opposite transition only when needed, avoiding TV flicker.
+# on/off force a sleep↔wake transition so the Fire TV's HDMI control fires
+# CEC: WAKEUP when already awake = no CEC (no OTP to TV); SLEEP when already
+# asleep = no CEC (no power-down to TV). So we check wakefulness first and
+# force the opposite transition only when needed, avoiding TV flicker.
 # KEYCODE_TV_POWER is dead on Fire OS. Deep sleep may drop ADB-WiFi; pre-connect
 # is best-effort, if it fails the device is out of ADB reach (hardware limit).
 def _wakefulness():
@@ -201,8 +201,8 @@ def cmd_set_ip(ip):
 
 def cmd_ip():
     cfg = load_cfg()
-    # derive the active alias from override or cfg.default; both
-    # index into cfg["devices"]. Override path only matters for alias-prefijo.
+    # Derive the active alias from override or cfg.default; both index into
+    # cfg["devices"]. Override path only matters for alias-prefixed dispatch.
     alias = _OVERRIDE_IP and next(
         (a for a, ip in cfg["devices"].items() if ip == _OVERRIDE_IP),
         cfg.get("default"),
@@ -352,8 +352,8 @@ def cmd_stream(path):
     url = f"http://{host_ip}:{port}/stream"
     print(f"Streaming {file.name} to Fire TV...")
 
-    # stdlib SimpleHTTPRequestHandler has no Range support; MKV puts
-    # its SeekHead at EOF, so VLC needs partial-content requests to start.
+    # stdlib SimpleHTTPRequestHandler has no Range support; MKV puts its
+    # SeekHead at EOF, so VLC needs partial-content requests to start.
     # Minimal 206 handler below; no 416/validation, VLC never sends bad ranges.
     # URL is fixed to /stream: VLC Android chokes on %-encoded brackets/plus.
     class _RangeHandler(http.server.SimpleHTTPRequestHandler):
@@ -407,9 +407,13 @@ def cmd_stream(path):
 
             return _Lim()
 
-    # kill stale server from a previous run (macOS lsof); without
-    # this, rebinding fails with EADDRINUSE after Ctrl+C leaves threads alive.
-    subprocess.run(["sh", "-c", f"lsof -ti :{port} | xargs kill -9 2>/dev/null"])
+    # Kill stale server from a previous run; without this, rebinding fails with
+    # EADDRINUSE after Ctrl+C leaves threads alive. Try macOS/BSD lsof first,
+    # fall back to Linux fuser if lsof is missing.
+    subprocess.run(
+        ["sh", "-c", f"lsof -ti :{port} | xargs kill -9 2>/dev/null || "
+                     f"fuser -k {port}/tcp 2>/dev/null"],
+    )
     with http.server.ThreadingHTTPServer(("", port), _RangeHandler) as httpd:
         # Force-stop VLC first: a stale VLC process can't reinitialize its
         # NativeWindow video surface, causing instant crash on replay.
@@ -507,8 +511,8 @@ def main():
     cmd = sys.argv[1]
     args = sys.argv[2:]
 
-    # Alias-prefijo: si argv[1] es un dispositivo conocido y no es un
-    # subcomando reservado, usar ese dispositivo y despachar argv[2:].
+    # Alias prefix: if argv[1] is a known device and not a reserved
+    # subcommand, target that device and dispatch argv[2:].
     if cmd not in RESERVED:
         cfg = load_cfg()
         if cmd in cfg.get("devices", {}):

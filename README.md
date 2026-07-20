@@ -265,8 +265,6 @@ attempts to reconnect before sending the command — so you don't need to run
 
 - If your Fire TV's IP changes (e.g. due to DHCP), update it with
   `ftv set-ip <new-IP>`.
-- Screen mirroring is not included in this script. For that, consider
-  an alternative screen-mirroring/casting app.
   For playing local video files, use `ftv stream` (requires VLC on the Fire TV).
 - `ftv launch` tries the standard `monkey` launcher first; if that fails
   (some Fire TV apps don't expose a LAUNCHER category), it automatically
