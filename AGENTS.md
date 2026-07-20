@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for OpenCode sessions working in this repo.
+Guidance for AI / contributor sessions working in this repo.
 
 ## What this repo is
 

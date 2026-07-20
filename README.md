@@ -265,7 +265,7 @@ attempts to reconnect before sending the command — so you don't need to run
 
 - If your Fire TV's IP changes (e.g. due to DHCP), update it with
   `ftv set-ip <new-IP>`.
-  For playing local video files, use `ftv stream` (requires VLC on the Fire TV).
+- For playing local video files, use `ftv stream` (requires VLC on the Fire TV).
 - `ftv launch` tries the standard `monkey` launcher first; if that fails
   (some Fire TV apps don't expose a LAUNCHER category), it automatically
   resolves the app's MAIN activity and launches it via `am start`.
