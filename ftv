@@ -11,8 +11,6 @@ from pathlib import Path
 CONFIG_DIR = Path.home() / ".config" / "ftv"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 PORT = 5555
-# ponytail: fixed limits keep stalled network calls visible; expose tuning only
-# if real devices show these defaults are insufficient.
 ADB_TIMEOUT = 30
 INSTALL_TIMEOUT = 120
 
