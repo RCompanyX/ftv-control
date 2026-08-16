@@ -30,6 +30,8 @@ IP is stored in `~/.config/ftv/config.json` (not in the repo).
 - **No copyrighted references:** examples in `README.md` and code comments must
   not name real apps, movies, or brands. Use generic placeholders
   (e.g. `com.example.app`).
+- **Comment style:** do not add comments containing `ponytail:` or references
+  to internal modes. Keep comments focused on the technical behavior.
 
 ## Confirmation required
 
