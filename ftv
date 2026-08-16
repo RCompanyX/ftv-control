@@ -11,6 +11,10 @@ from pathlib import Path
 CONFIG_DIR = Path.home() / ".config" / "ftv"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 PORT = 5555
+# ponytail: fixed limits keep stalled network calls visible; expose tuning only
+# if real devices show these defaults are insufficient.
+ADB_TIMEOUT = 30
+INSTALL_TIMEOUT = 120
 
 # Module-global IP override for alias-prefixed dispatch. Not thread-safe, but
 # the script is single-threaded. Upgrade: pass ip through every cmd_* if we
@@ -51,7 +55,7 @@ KEYEVENTS = {
 _TARGET_CMDS = {"shell", "install", "uninstall", "push", "pull", "reboot"}
 
 
-def adb(*args, check=True, capture_output=False):
+def adb(*args, check=True, capture_output=False, timeout=ADB_TIMEOUT):
     if args and args[0] in _TARGET_CMDS:
         ip = get_ip()
         if ip:
@@ -60,9 +64,20 @@ def adb(*args, check=True, capture_output=False):
         return subprocess.run(
             ["adb"] + list(args),
             check=check, capture_output=capture_output, text=True,
+            timeout=timeout,
         )
     except FileNotFoundError:
         sys.exit("Error: adb not found. Install Android Platform Tools.")
+    except subprocess.TimeoutExpired:
+        sys.exit(f"Error: adb timed out after {timeout} seconds.")
+    except subprocess.CalledProcessError as e:
+        detail = (e.stderr or e.stdout or "").strip()
+        message = f"Error: adb failed with exit code {e.returncode}."
+        if detail:
+            message += f" {detail}"
+        sys.exit(message)
+    except OSError as e:
+        sys.exit(f"Error: could not execute adb: {e}")
 
 
 def load_cfg():
@@ -321,12 +336,12 @@ def cmd_list(third_only=False):
 
 def cmd_install(apk):
     ensure_connected()
-    adb("install", apk)
+    adb("install", apk, timeout=INSTALL_TIMEOUT)
 
 
 def cmd_reinstall(apk):
     ensure_connected()
-    adb("install", "-r", apk)
+    adb("install", "-r", apk, timeout=INSTALL_TIMEOUT)
 
 
 def cmd_uninstall(pkg):
