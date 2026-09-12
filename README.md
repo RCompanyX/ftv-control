@@ -209,12 +209,19 @@ ftv <subcommand> [arguments]
 
 | Command | Description |
 |---------|-------------|
-| `ftv stream <video-file>` | Stream a local video file to VLC on the Fire TV |
+| `ftv stream <video-file> [port]` | Stream a local video file to VLC on the Fire TV |
 
 `ftv stream` starts a temporary HTTP server on your machine and opens the file
 in VLC on the Fire TV, so the video plays over the network without copying it
 to the device's limited storage. VLC must be installed on the Fire TV. Stop the
 server with `Ctrl+C` when you're done watching.
+
+The server listens on the Fire TV-facing LAN address and uses an unguessable,
+temporary URL. If port `8765` is already in use, choose another port:
+
+```sh
+ftv stream ~/Videos/video.mkv 8766
+```
 
 ### Other
 
@@ -260,6 +267,17 @@ ftv screenshot ~/Pictures/firetv.png
 If a command is run while the ADB connection has dropped, `ftv` automatically
 attempts to reconnect before sending the command — so you don't need to run
 `ftv connect` manually after the Fire TV reboots or the WiFi blips.
+
+## Testing
+
+Run the dependency-free unit tests with:
+
+```sh
+python3 -m unittest discover -s tests -v
+```
+
+To test a connected Fire TV manually, copy the repository script to its live
+location and run a subcommand such as `ftv status`.
 
 ## Notes
 
