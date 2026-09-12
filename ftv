@@ -2,6 +2,10 @@
 """ftv - Control your Amazon Fire TV via ADB."""
 
 import json
+import ipaddress
+import os
+import re
+import secrets
 import subprocess
 import sys
 import time
@@ -57,7 +61,7 @@ def adb(*args, check=True, capture_output=False, timeout=ADB_TIMEOUT):
     if args and args[0] in _TARGET_CMDS:
         ip = get_ip()
         if ip:
-            args = ("-s", f"{ip}:{PORT}") + args
+            args = ("-s", device_serial(ip)) + args
     try:
         return subprocess.run(
             ["adb"] + list(args),
@@ -78,18 +82,49 @@ def adb(*args, check=True, capture_output=False, timeout=ADB_TIMEOUT):
         sys.exit(f"Error: could not execute adb: {e}")
 
 
+def _empty_cfg():
+    return {"devices": {}, "default": None}
+
+
+def _valid_ip(ip):
+    try:
+        ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return True
+
+
+def device_serial(ip):
+    return f"[{ip}]:{PORT}" if ":" in ip else f"{ip}:{PORT}"
+
+
 def load_cfg():
-    """Read config, migrating legacy {"ip": ...} on the fly."""
+    """Read and validate config, migrating legacy {"ip": ...} in memory."""
     try:
         cfg = json.loads(CONFIG_FILE.read_text())
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {"devices": {}, "default": None}
+    except FileNotFoundError:
+        return _empty_cfg()
+    except json.JSONDecodeError as e:
+        sys.exit(f"Error: invalid configuration file {CONFIG_FILE}: {e.msg}")
+    except OSError as e:
+        sys.exit(f"Error: could not read configuration file {CONFIG_FILE}: {e}")
+    if not isinstance(cfg, dict):
+        sys.exit(f"Error: invalid configuration file {CONFIG_FILE}: expected an object.")
     if "ip" in cfg and "devices" not in cfg:
         # Migrate legacy single-IP config in memory; persisted on next
         # save_device(). Upgrade: drop once all users have migrated.
-        return {"devices": {"default": cfg["ip"]}, "default": "default"}
-    cfg.setdefault("devices", {})
-    cfg.setdefault("default", next(iter(cfg["devices"]), None))
+        cfg = {"devices": {"default": cfg["ip"]}, "default": "default"}
+    devices = cfg.get("devices", {})
+    if not isinstance(devices, dict):
+        sys.exit(f"Error: invalid configuration file {CONFIG_FILE}: devices must be an object.")
+    if any(not isinstance(alias, str) or not isinstance(ip, str) or not _valid_ip(ip)
+           for alias, ip in devices.items()):
+        sys.exit(f"Error: invalid configuration file {CONFIG_FILE}: devices must contain IP addresses.")
+    default = cfg.get("default")
+    if default is not None and not isinstance(default, str):
+        sys.exit(f"Error: invalid configuration file {CONFIG_FILE}: default must be a device alias.")
+    cfg["devices"] = devices
+    cfg["default"] = default if default in devices else next(iter(devices), None)
     return cfg
 
 
@@ -109,6 +144,10 @@ def get_ip():
 
 
 def save_device(alias, ip, make_default=True):
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,31}", alias):
+        sys.exit("Error: alias must contain only letters, numbers, hyphens, or underscores.")
+    if not _valid_ip(ip):
+        sys.exit(f"Error: '{ip}' is not a valid IP address.")
     cfg = load_cfg()
     cfg["devices"][alias] = ip
     if make_default and not cfg.get("default"):
@@ -122,7 +161,7 @@ def connected():
     if not ip:
         return False
     r = adb("devices", capture_output=True, check=False)
-    target = f"{ip}:{PORT}"
+    target = device_serial(ip)
     return any(target in line and line.rstrip().endswith("\tdevice")
                for line in r.stdout.splitlines())
 
@@ -133,7 +172,7 @@ def ensure_connected():
         sys.exit("Error: no IP configured. Use: ftv set-ip <IP>")
     if not connected():
         print(f"Connecting to {ip}:{PORT}...", file=sys.stderr)
-        adb("connect", f"{ip}:{PORT}", check=False, capture_output=True)
+        adb("connect", device_serial(ip), check=False, capture_output=True)
         if not connected():
             sys.exit(
                 f"Error: could not connect to {ip}:{PORT}\n"
@@ -163,8 +202,9 @@ def _wakefulness():
 
 def cmd_on():
     ip = get_ip()
-    if ip:
-        adb("connect", f"{ip}:{PORT}", check=False, capture_output=True)
+    if not ip:
+        sys.exit("Error: no IP configured. Use: ftv set-ip <IP>")
+    adb("connect", device_serial(ip), check=False, capture_output=True)
     if _wakefulness() == "Awake":
         keyevent("KEYCODE_SLEEP")  # force transition: WAKEUP alone sends no CEC
         time.sleep(1)
@@ -175,6 +215,8 @@ def cmd_on():
 
 
 def cmd_off():
+    if not get_ip():
+        sys.exit("Error: no IP configured. Use: ftv set-ip <IP>")
     if _wakefulness() == "Asleep":
         keyevent("KEYCODE_WAKEUP")  # force transition: SLEEP alone sends no CEC
         time.sleep(1)
@@ -188,13 +230,13 @@ def cmd_connect():
     ip = get_ip()
     if not ip:
         sys.exit("Error: no IP configured. Use: ftv set-ip <IP>")
-    adb("connect", f"{ip}:{PORT}")
+    adb("connect", device_serial(ip))
 
 
 def cmd_disconnect():
     ip = get_ip()
     if ip:
-        adb("disconnect", f"{ip}:{PORT}")
+        adb("disconnect", device_serial(ip))
     else:
         adb("disconnect")
 
@@ -205,6 +247,8 @@ def cmd_status():
 
 def cmd_set_ip(ip):
     # Backward compat: set-ip => add default + use default.
+    if not _valid_ip(ip):
+        sys.exit(f"Error: '{ip}' is not a valid IP address.")
     cfg = load_cfg()
     cfg["devices"]["default"] = ip
     cfg["default"] = "default"
@@ -286,15 +330,18 @@ def cmd_type(text):
 
 
 def cmd_screenshot(path=None):
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     if path:
         out = path
     else:
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         out = str(Path.home() / "Desktop" / f"firetv_{ts}.png")
+    remote = f"/sdcard/ftv_shot_{ts}_{os.getpid()}.png"
     ensure_connected()
-    adb("shell", "screencap", "-p", "/sdcard/ftv_shot.png")
-    adb("pull", "/sdcard/ftv_shot.png", out)
-    adb("shell", "rm", "/sdcard/ftv_shot.png")
+    adb("shell", "screencap", "-p", remote)
+    try:
+        adb("pull", remote, out)
+    finally:
+        adb("shell", "rm", remote, check=False, capture_output=True)
     print(f"Screenshot saved to: {out}")
 
 
@@ -306,18 +353,18 @@ def cmd_launch(pkg):
         "-c", "android.intent.category.LAUNCHER", "1",
         capture_output=True, check=False,
     )
-    if r.returncode == 0:
+    if r.returncode == 0 and "No activities found" not in r.stdout:
         print(f"App {pkg} launched.")
         return
-    # monkey failed: resolve MAIN activity and launch with am start
+    # monkey failed: ask the package manager for the actual MAIN activity.
     r = adb(
-        "shell", "dumpsys", "package", pkg,
+        "shell", "cmd", "package", "resolve-activity", "--brief",
+        "-a", "android.intent.action.MAIN", "-p", pkg,
         capture_output=True, check=False,
     )
-    import re
-    m = re.search(rf"{re.escape(pkg)}/([A-Za-z0-9._]+)", r.stdout)
+    m = re.search(rf"^{re.escape(pkg)}/[A-Za-z0-9_.$]+$", r.stdout, re.MULTILINE)
     if m:
-        activity = f"{pkg}/{m.group(1)}"
+        activity = m.group(0)
         adb("shell", "am", "start", "-n", activity, capture_output=True)
         print(f"App {pkg} launched via am start ({activity}).")
         return
@@ -347,9 +394,8 @@ def cmd_uninstall(pkg):
     adb("uninstall", pkg)
 
 
-def cmd_stream(path):
+def cmd_stream(path, port=8765):
     import http.server
-    import os
     import socket
 
     file = Path(path).resolve()
@@ -361,14 +407,14 @@ def cmd_stream(path):
     s.connect((get_ip(), 1))
     host_ip = s.getsockname()[0]
     s.close()
-    port = 8765  # fixed port, pass as arg if a clash ever happens
-    url = f"http://{host_ip}:{port}/stream"
+    token = secrets.token_urlsafe(24)
+    stream_path = f"/stream/{token}"
+    url = f"http://{host_ip}:{port}{stream_path}"
     print(f"Streaming {file.name} to Fire TV...")
 
     # stdlib SimpleHTTPRequestHandler has no Range support; MKV puts its
     # SeekHead at EOF, so VLC needs partial-content requests to start.
-    # Minimal 206 handler below; no 416/validation, VLC never sends bad ranges.
-    # URL is fixed to /stream: VLC Android chokes on %-encoded brackets/plus.
+    # Minimal single-range handler with a tokenized URL for LAN access control.
     class _RangeHandler(http.server.SimpleHTTPRequestHandler):
         protocol_version = "HTTP/1.1"  # 206 Partial Content requires HTTP/1.1
 
@@ -382,6 +428,9 @@ def cmd_stream(path):
             return str(file)  # serve the target file regardless of URL
 
         def send_head(self):
+            if self.path.split("?", 1)[0] != stream_path:
+                self.send_error(404)
+                return None
             p = self.translate_path(self.path)
             try:
                 f = open(p, "rb")
@@ -391,13 +440,27 @@ def cmd_stream(path):
             size = os.fstat(f.fileno()).st_size
             start, end = 0, size - 1
             rng = self.headers.get("Range")
-            if rng and rng.startswith("bytes="):
-                s_, e_ = rng[6:].split("-", 1)
-                if s_:
-                    start = int(s_)
-                    end = int(e_) if e_ else size - 1
-                else:  # suffix range: last N bytes
-                    start = max(0, size - int(e_))
+            if rng:
+                try:
+                    if not rng.startswith("bytes=") or "," in rng:
+                        raise ValueError
+                    s_, e_ = rng[6:].split("-", 1)
+                    if s_:
+                        start = int(s_)
+                        end = int(e_) if e_ else size - 1
+                    else:  # suffix range: last N bytes
+                        length = int(e_)
+                        if length <= 0:
+                            raise ValueError
+                        start = max(0, size - length)
+                    if start < 0 or start >= size or end < start:
+                        raise ValueError
+                except ValueError:
+                    f.close()
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{size}")
+                    self.end_headers()
+                    return None
                 end = min(end, size - 1)  # clamp: client range may exceed EOF
                 self.send_response(206)
                 self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
@@ -426,14 +489,11 @@ def cmd_stream(path):
 
             return _Lim()
 
-    # Kill stale server from a previous run; without this, rebinding fails with
-    # EADDRINUSE after Ctrl+C leaves threads alive. Try macOS/BSD lsof first,
-    # fall back to Linux fuser if lsof is missing.
-    subprocess.run(
-        ["sh", "-c", f"lsof -ti :{port} | xargs kill -9 2>/dev/null || "
-                     f"fuser -k {port}/tcp 2>/dev/null"],
-    )
-    with http.server.ThreadingHTTPServer(("", port), _RangeHandler) as httpd:
+    try:
+        httpd = http.server.ThreadingHTTPServer((host_ip, port), _RangeHandler)
+    except OSError as e:
+        sys.exit(f"Error: cannot start stream server on {host_ip}:{port}: {e}")
+    with httpd:
         # Force-stop VLC first: a stale VLC process can't reinitialize its
         # NativeWindow video surface, causing instant crash on replay.
         adb("shell", "am", "force-stop", "org.videolan.vlc",
@@ -507,7 +567,8 @@ APPS:
   ftv uninstall <package>   Uninstall an app
 
 STREAMING:
-  ftv stream <video-file>  Stream a video file to Fire TV via VLC
+  ftv stream <video-file> [port]
+                           Stream a video file to Fire TV via VLC
 
 OTHERS:
   ftv help                  Show this help
@@ -600,8 +661,16 @@ def main():
         cmd_uninstall(args[0])
     elif cmd in ("stream", "cast"):
         if not args:
-            sys.exit("Usage: ftv stream <video-file>")
-        cmd_stream(args[0])
+            sys.exit("Usage: ftv stream <video-file> [port]")
+        port = 8765
+        if len(args) > 1:
+            try:
+                port = int(args[1])
+            except ValueError:
+                sys.exit("Error: port must be a number between 1 and 65535.")
+            if not 1 <= port <= 65535:
+                sys.exit("Error: port must be between 1 and 65535.")
+        cmd_stream(args[0], port)
     elif cmd in ("help", "-h", "--help"):
         cmd_help()
     else:
